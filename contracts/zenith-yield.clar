@@ -303,3 +303,105 @@
     (ok rewards)
   )
 )
+
+;; ADMIN FUNCTIONS
+
+(define-public (set-platform-fee (new-fee uint))
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (<= new-fee u1000) err-invalid-amount)
+    (var-set platform-fee-rate new-fee)
+    (ok true)
+  )
+)
+
+(define-public (set-emergency-shutdown (shutdown bool))
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (var-set emergency-shutdown shutdown)
+    (ok true)
+  )
+)
+
+;; Enhanced token whitelisting with input validation
+(define-public (whitelist-token (token principal))
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (is-valid-principal token) err-invalid-token)
+    (map-set whitelisted-tokens { token: token } { approved: true })
+    (ok true)
+  )
+)
+
+;; New function to mark tokens as trusted contracts
+(define-public (set-trusted-token-contract (token principal) (trusted bool))
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (is-valid-principal token) err-invalid-token)
+    (map-set trusted-token-contracts { token: token } { trusted: trusted })
+    (ok true)
+  )
+)
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-protocol (protocol-id uint))
+  (map-get? protocols { protocol-id: protocol-id })
+)
+
+(define-read-only (get-user-deposit (user principal))
+  (map-get? user-deposits { user: user })
+)
+
+(define-read-only (get-total-tvl)
+  (var-get total-tvl)
+)
+
+(define-read-only (is-whitelisted (token <sip-010-trait>))
+  (let ((token-contract (contract-of token)))
+    (and
+      (is-trusted-token-contract token-contract)
+      (default-to false
+        (get approved (map-get? whitelisted-tokens { token: token-contract }))
+      )
+    )
+  )
+)
+
+(define-read-only (is-trusted-token-contract (token principal))
+  (default-to false
+    (get trusted (map-get? trusted-token-contracts { token: token }))
+  )
+)
+
+;; PRIVATE UTILITY FUNCTIONS
+
+(define-private (is-contract-owner)
+  (is-eq tx-sender contract-owner)
+)
+
+(define-private (is-valid-protocol-id (protocol-id uint))
+  (and
+    (> protocol-id u0)
+    (<= protocol-id max-protocol-id)
+  )
+)
+
+(define-private (is-valid-apy (apy uint))
+  (and
+    (>= apy min-apy)
+    (<= apy max-apy)
+  )
+)
+
+(define-private (is-valid-name (name (string-ascii 64)))
+  (and
+    (not (is-eq name ""))
+    (<= (len name) u64)
+  )
+)
+
+(define-private (is-valid-principal (principal-to-check principal))
+  ;; Basic validation that the principal is not the zero address
+  (not (is-eq principal-to-check 'SP000000000000000000002Q6VF78))
+)
