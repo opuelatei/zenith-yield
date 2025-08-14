@@ -101,3 +101,106 @@
     claimed: uint,
   }
 )
+
+(define-map protocols
+  { protocol-id: uint }
+  {
+    name: (string-ascii 64),
+    active: bool,
+    apy: uint,
+  }
+)
+
+(define-map strategy-allocations
+  { protocol-id: uint }
+  { allocation: uint } ;; allocation in basis points (100 = 1%)
+)
+
+(define-map whitelisted-tokens
+  { token: principal }
+  { approved: bool }
+)
+
+;; Trusted token contracts map for additional security
+(define-map trusted-token-contracts
+  { token: principal }
+  { trusted: bool }
+)
+
+;; PROTOCOL MANAGEMENT FUNCTIONS
+
+(define-public (add-protocol
+    (protocol-id uint)
+    (name (string-ascii 64))
+    (initial-apy uint)
+  )
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (is-valid-protocol-id protocol-id) err-invalid-protocol-id)
+    (asserts! (not (protocol-exists protocol-id)) err-protocol-exists)
+    (asserts! (is-valid-name name) err-invalid-name)
+    (asserts! (is-valid-apy initial-apy) err-invalid-apy)
+
+    (map-set protocols { protocol-id: protocol-id } {
+      name: name,
+      active: protocol-active,
+      apy: initial-apy,
+    })
+    (map-set strategy-allocations { protocol-id: protocol-id } { allocation: u0 })
+    (ok true)
+  )
+)
+
+(define-public (update-protocol-status
+    (protocol-id uint)
+    (active bool)
+  )
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (is-valid-protocol-id protocol-id) err-invalid-protocol-id)
+    (asserts! (protocol-exists protocol-id) err-invalid-protocol-id)
+
+    (let ((protocol (unwrap-panic (get-protocol protocol-id))))
+      (map-set protocols { protocol-id: protocol-id }
+        (merge protocol { active: active })
+      )
+    )
+    (ok true)
+  )
+)
+
+(define-public (update-protocol-apy
+    (protocol-id uint)
+    (new-apy uint)
+  )
+  (begin
+    (asserts! (is-contract-owner) err-not-authorized)
+    (asserts! (is-valid-protocol-id protocol-id) err-invalid-protocol-id)
+    (asserts! (protocol-exists protocol-id) err-invalid-protocol-id)
+    (asserts! (is-valid-apy new-apy) err-invalid-apy)
+
+    (let ((protocol (unwrap-panic (get-protocol protocol-id))))
+      (map-set protocols { protocol-id: protocol-id }
+        (merge protocol { apy: new-apy })
+      )
+    )
+    (ok true)
+  )
+)
+
+;; USER INTERACTION FUNCTIONS
+
+(define-public (deposit
+    (token-trait <sip-010-trait>)
+    (amount uint)
+  )
+  (let (
+      (user-principal tx-sender)
+      (token-contract (contract-of token-trait))
+      (current-deposit (default-to {
+        amount: u0,
+        last-deposit-block: u0,
+      }
+        (map-get? user-deposits { user: user-principal })
+      ))
+    )
