@@ -204,3 +204,102 @@
         (map-get? user-deposits { user: user-principal })
       ))
     )
+    ;; Enhanced token validation with trusted contract check
+    (asserts! (is-trusted-token-contract token-contract) err-token-not-whitelisted)
+    (try! (validate-token-strict token-trait))
+    (asserts! (not (var-get emergency-shutdown)) err-strategy-disabled)
+    (asserts! (>= amount (var-get min-deposit)) err-min-deposit-not-met)
+    (asserts! (<= (+ amount (get amount current-deposit)) (var-get max-deposit))
+      err-max-deposit-reached
+    )
+
+    ;; Safe token transfer with proper error handling
+    (unwrap! (contract-call? token-trait transfer amount user-principal
+      (as-contract tx-sender) none) err-token-transfer-failed)
+
+    (map-set user-deposits { user: user-principal } {
+      amount: (+ amount (get amount current-deposit)),
+      last-deposit-block: stacks-block-height,
+    })
+
+    (var-set total-tvl (+ (var-get total-tvl) amount))
+
+    (try! (rebalance-protocols))
+    (ok true)
+  )
+)
+
+(define-public (withdraw
+    (token-trait <sip-010-trait>)
+    (amount uint)
+  )
+  (let (
+      (user-principal tx-sender)
+      (token-contract (contract-of token-trait))
+      (current-deposit (default-to {
+        amount: u0,
+        last-deposit-block: u0,
+      }
+        (map-get? user-deposits { user: user-principal })
+      ))
+    )
+    ;; Enhanced token validation
+    (asserts! (is-trusted-token-contract token-contract) err-token-not-whitelisted)
+    (try! (validate-token-strict token-trait))
+    (asserts! (<= amount (get amount current-deposit)) err-insufficient-balance)
+
+    (map-set user-deposits { user: user-principal } {
+      amount: (- (get amount current-deposit) amount),
+      last-deposit-block: (get last-deposit-block current-deposit),
+    })
+
+    (var-set total-tvl (- (var-get total-tvl) amount))
+
+    ;; Safe token transfer with proper error handling
+    (as-contract 
+      (unwrap! (contract-call? token-trait transfer amount tx-sender user-principal none)
+        err-token-transfer-failed)
+    )
+
+    (ok true)
+  )
+)
+
+(define-public (claim-rewards (token-trait <sip-010-trait>))
+  (let (
+      (user-principal tx-sender)
+      (token-contract (contract-of token-trait))
+      (rewards (calculate-rewards user-principal
+        (- stacks-block-height
+          (get last-deposit-block
+            (unwrap-panic (get-user-deposit user-principal))
+          ))
+      ))
+    )
+    ;; Enhanced token validation
+    (asserts! (is-trusted-token-contract token-contract) err-token-not-whitelisted)
+    (try! (validate-token-strict token-trait))
+    (asserts! (> rewards u0) err-invalid-amount)
+
+    (map-set user-rewards { user: user-principal } {
+      pending: u0,
+      claimed: (+ rewards
+        (get claimed
+          (default-to {
+            pending: u0,
+            claimed: u0,
+          }
+            (map-get? user-rewards { user: user-principal })
+          ))
+      ),
+    })
+
+    ;; Safe token transfer with proper error handling
+    (as-contract 
+      (unwrap! (contract-call? token-trait transfer rewards tx-sender user-principal none)
+        err-token-transfer-failed)
+    )
+
+    (ok rewards)
+  )
+)
