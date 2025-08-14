@@ -405,3 +405,77 @@
   ;; Basic validation that the principal is not the zero address
   (not (is-eq principal-to-check 'SP000000000000000000002Q6VF78))
 )
+
+(define-private (protocol-exists (protocol-id uint))
+  (is-some (map-get? protocols { protocol-id: protocol-id }))
+)
+
+;; Enhanced token validation function
+(define-private (validate-token-strict (token-trait <sip-010-trait>))
+  (let (
+      (token-contract (contract-of token-trait))
+      (token-info (map-get? whitelisted-tokens { token: token-contract }))
+    )
+    (asserts! (is-valid-principal token-contract) err-invalid-token)
+    (asserts! (is-some token-info) err-token-not-whitelisted)
+    (asserts! (get approved (unwrap-panic token-info)) err-protocol-not-whitelisted)
+    (asserts! (is-trusted-token-contract token-contract) err-token-not-whitelisted)
+    (ok true)
+  )
+)
+
+;; Legacy validation function - kept for backward compatibility but enhanced
+(define-private (validate-token (token-trait <sip-010-trait>))
+  (validate-token-strict token-trait)
+)
+
+;; YIELD CALCULATION & STRATEGY FUNCTIONS
+
+(define-private (calculate-rewards
+    (user principal)
+    (blocks uint)
+  )
+  (let (
+      (user-deposit (unwrap-panic (get-user-deposit user)))
+      (weighted-apy (get-weighted-apy))
+    )
+    (/ (* (get amount user-deposit) weighted-apy blocks) (* u10000 u144 u365))
+  )
+)
+
+(define-private (rebalance-protocols)
+  (let ((total-allocations (fold + (map get-protocol-allocation (get-protocol-list)) u0)))
+    (asserts! (<= total-allocations u10000) err-invalid-amount)
+    (ok true)
+  )
+)
+
+(define-private (get-weighted-apy)
+  (fold + (map get-weighted-protocol-apy (get-protocol-list)) u0)
+)
+
+(define-private (get-weighted-protocol-apy (protocol-id uint))
+  (let (
+      (protocol (unwrap-panic (get-protocol protocol-id)))
+      (allocation (get allocation
+        (unwrap-panic (map-get? strategy-allocations { protocol-id: protocol-id }))
+      ))
+    )
+    (if (get active protocol)
+      (/ (* (get apy protocol) allocation) u10000)
+      u0
+    )
+  )
+)
+
+(define-private (get-protocol-list)
+  (list u1 u2 u3 u4 u5)
+  ;; Supported protocol IDs
+)
+
+(define-private (get-protocol-allocation (protocol-id uint))
+  (get allocation
+    (default-to { allocation: u0 }
+      (map-get? strategy-allocations { protocol-id: protocol-id })
+    ))
+)
